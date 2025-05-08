@@ -76,3 +76,72 @@
     is-active: bool
   }
 )
+
+(define-map Reviews {product-id: uint, reviewer: principal}
+  {
+    rating: uint,
+    comment: (string-ascii 200),
+    timestamp: uint
+  }
+)
+
+;; Brand Management Functions
+
+;; Register a new brand on the marketplace
+(define-public (register-brand (name (string-ascii 50)))
+  (let
+    ((brand-data {
+      name: name,
+      verified: false,
+      created-at: stacks-block-height
+    }))
+    (ok (map-set Brands tx-sender brand-data))
+  )
+)
+
+;; Verify a brand (restricted to contract owner)
+(define-public (verify-brand (brand principal))
+  (if (is-eq tx-sender contract-owner)
+    (let
+      ((brand-data (unwrap! (map-get? Brands brand) (err err-not-brand-owner))))
+      ;; Check that the brand exists before modifying
+      (if (is-some (map-get? Brands brand))
+        (ok (map-set Brands brand (merge brand-data {verified: true})))
+        (err err-not-brand-owner)))
+    (err err-owner-only))
+)
+
+;; Direct Sale Functions
+
+;; List a new product for direct sale
+(define-public (list-product 
+    (name (string-ascii 100))
+    (description (string-ascii 500))
+    (price uint)
+  )
+  (let
+    ((brand (unwrap! (map-get? Brands tx-sender) (err err-not-brand-owner)))
+     (product-id (+ (var-get product-counter) u1))
+     (name-length (len name))
+     (description-length (len description)))
+    
+    ;; Add validation for non-empty name and description
+    (if (>= name-length min-name-length)
+      (if (>= description-length min-description-length)
+        (if (> price u0)
+          (begin
+            (var-set product-counter product-id)
+            (ok (map-set Products product-id {
+              brand: tx-sender,
+              name: name,
+              description: description,
+              price: price,
+              available: true,
+              created-at: stacks-block-height,
+              is-auction: false
+            })))
+          (err err-invalid-price))
+        (err err-empty-description))
+      (err err-empty-name))
+  )
+)
