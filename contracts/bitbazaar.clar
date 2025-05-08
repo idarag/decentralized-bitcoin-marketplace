@@ -216,3 +216,69 @@
       (err err-empty-name))
   )
 )
+
+;; Place a bid on an active auction
+(define-public (place-bid (product-id uint) (bid-amount uint))
+  (let
+    ((product (unwrap! (map-get? Products product-id) (err err-listing-not-found)))
+     (auction (unwrap! (map-get? Auctions product-id) (err err-no-active-auction))))
+    
+    (if (and 
+          (get is-active auction)
+          (<= stacks-block-height (get end-block auction))
+          (>= bid-amount (get min-price auction))
+          (> bid-amount (get highest-bid auction))
+          (>= (stx-get-balance tx-sender) bid-amount))
+      (let
+        ((return-result (match (get highest-bidder auction)
+          prev-bidder (stx-transfer? (get highest-bid auction) contract-owner prev-bidder)
+          (ok true)))
+         (bid-result (stx-transfer? bid-amount tx-sender contract-owner)))
+        
+        (if (and (is-ok return-result) (is-ok bid-result))
+          (ok (map-set Auctions product-id
+            (merge auction {
+              highest-bid: bid-amount,
+              highest-bidder: (some tx-sender)
+            })))
+          (err err-transfer-failed)))
+      ;; Error handling with nested if statements
+      (if (not (get is-active auction))
+        (err err-auction-ended)
+        (if (> stacks-block-height (get end-block auction))
+          (err err-auction-ended)
+          (if (< bid-amount (get min-price auction))
+            (err err-bid-too-low)
+            (if (<= bid-amount (get highest-bid auction))
+              (err err-bid-too-low)
+              (err err-insufficient-funds))))))
+  )
+)
+
+;; Finalize an auction after its end time
+(define-public (end-auction (product-id uint))
+  (let
+    ((product (unwrap! (map-get? Products product-id) (err err-listing-not-found)))
+     (auction (unwrap! (map-get? Auctions product-id) (err err-no-active-auction)))
+     (brand (get brand product)))
+    
+    (if (and 
+          (get is-active auction)
+          (>= stacks-block-height (get end-block auction)))
+      (match (get highest-bidder auction)
+        winner 
+          (let ((bid-amount (get highest-bid auction))
+                (fee (/ (* bid-amount (var-get platform-fee)) u1000))
+                (fee-transfer (stx-transfer? fee contract-owner contract-owner))
+                (payment-transfer (stx-transfer? (- bid-amount fee) contract-owner brand)))
+            (if (and (is-ok fee-transfer) (is-ok payment-transfer))
+              (begin
+                (map-set Products product-id (merge product {available: false}))
+                (ok (map-set Auctions product-id (merge auction {is-active: false}))))
+              (err err-transfer-failed)))
+        (err err-no-active-auction))
+      (if (not (get is-active auction))
+        (err err-auction-ended)
+        (err err-auction-ended)))
+  )
+)
