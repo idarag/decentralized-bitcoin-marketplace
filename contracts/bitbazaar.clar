@@ -282,3 +282,52 @@
         (err err-auction-ended)))
   )
 )
+
+;; Review System
+
+;; Add a review for a product
+(define-public (add-review 
+    (product-id uint)
+    (rating uint)
+    (comment (string-ascii 200)))
+  (let
+    ((product (unwrap! (map-get? Products product-id) (err err-listing-not-found)))
+     (comment-length (len comment)))
+    ;; Make sure product exists and comment is not empty
+    (if (is-some (map-get? Products product-id))
+      (if (>= comment-length min-description-length)
+        (if (<= rating u5)
+          (ok (map-set Reviews 
+            {product-id: product-id, reviewer: tx-sender}
+            {
+              rating: rating,
+              comment: comment,
+              timestamp: stacks-block-height
+            }))
+          (err err-invalid-rating))
+        (err err-empty-description))
+      (err err-listing-not-found))
+  )
+)
+
+;; Read-only Functions
+
+;; Get product details
+(define-read-only (get-product (product-id uint))
+  (ok (map-get? Products product-id))
+)
+
+;; Get brand details
+(define-read-only (get-brand (brand principal))
+  (ok (map-get? Brands brand))
+)
+
+;; Get a specific review
+(define-read-only (get-review (product-id uint) (reviewer principal))
+  (ok (map-get? Reviews {product-id: product-id, reviewer: reviewer}))
+)
+
+;; Get auction details
+(define-read-only (get-auction (product-id uint))
+  (ok (map-get? Auctions product-id))
+)
